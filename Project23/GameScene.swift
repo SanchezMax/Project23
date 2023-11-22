@@ -13,7 +13,7 @@ enum ForceBomb {
 }
 
 enum SequenceType: CaseIterable {
-    case oneNoBomb, one, twoWithOneBomb, two, three, four, chain, fastChain
+    case oneNoBomb, one, twoWithOneBomb, two, three, four, chain, fastChain, fastMoving
 }
 
 class GameScene: SKScene {
@@ -44,6 +44,19 @@ class GameScene: SKScene {
     
     var isGameEnded = false
     
+    // magic numbers
+    let angularVelocity: CGFloat = 3
+    
+    let maxXVelocity = 15
+    let midPlusXVelocity = 8
+    let midMinusXVelocity = 5
+    let minXVelocity = 3
+    
+    let maxYVelocity = 32
+    let minYVelocity = 24
+    
+    let velocityMultiplier = 40
+    
     override func didMove(to view: SKView) {
         let background = SKSpriteNode(imageNamed: "sliceBackground")
         background.scale(to: CGSize(width: 1133, height: 744))
@@ -59,7 +72,7 @@ class GameScene: SKScene {
         createLives()
         createSlices()
         
-        sequence = [.oneNoBomb, .oneNoBomb, .twoWithOneBomb, .twoWithOneBomb, .three, .one, .chain]
+        sequence = [.oneNoBomb, .oneNoBomb, .twoWithOneBomb, .twoWithOneBomb, .three, .one, .chain, .fastMoving]
         
         for _ in 0...1000 {
             if let nextSequence = SequenceType.allCases.randomElement() {
@@ -140,7 +153,31 @@ class GameScene: SKScene {
                 let seq = SKAction.sequence([group, .removeFromParent()])
                 node.run(seq)
                 
-                score += 1
+                    score += 1
+                
+                if let index = activeEnemies.firstIndex(of: node) {
+                    activeEnemies.remove(at: index)
+                }
+                
+                run(SKAction.playSoundFileNamed("whack.caf", waitForCompletion: false))
+            } else if node.name == "enemyFast" {
+                // destroy the penguin
+                if let emitter = SKEmitterNode(fileNamed: "sliceHitEnemy") {
+                    emitter.position = node.position
+                    addChild(emitter)
+                }
+                
+                node.name = ""
+                node.physicsBody?.isDynamic = false
+                
+                let scaleOut = SKAction.scale(to: 0.001, duration: 0.2)
+                let fadeOut = SKAction.fadeOut(withDuration: 0.2)
+                let group = SKAction.group([scaleOut, fadeOut])
+                
+                let seq = SKAction.sequence([group, .removeFromParent()])
+                node.run(seq)
+                
+                score += 2
                 
                 if let index = activeEnemies.firstIndex(of: node) {
                     activeEnemies.remove(at: index)
@@ -191,6 +228,18 @@ class GameScene: SKScene {
             livesImages[1].texture = SKTexture(imageNamed: "sliceLifeGone")
             livesImages[2].texture = SKTexture(imageNamed: "sliceLifeGone")
         }
+        
+        let gameOver = SKSpriteNode(imageNamed: "gameOver")
+        gameOver.position = view?.center ?? CGPoint(x: 590, y: 410)
+        gameOver.zPosition = 1
+        addChild(gameOver)
+        
+        gameScore.text = "You have scored \(score) points"
+        gameScore.position = CGPoint(x: view?.center.x ?? 590, y: (view?.center.y ?? 410) - gameOver.size.height - 10)
+        gameScore.zPosition = 1
+        gameScore.horizontalAlignmentMode = .center
+        
+        run(SKAction.playSoundFileNamed("gameOver.mp3", waitForCompletion: false))
     }
     
     func playSwooshSound() {
@@ -248,7 +297,7 @@ class GameScene: SKScene {
         activeSliceFG.path = path.cgPath
     }
     
-    func createEnemy(forceBomb: ForceBomb = .random) {
+    func createEnemy(forceBomb: ForceBomb = .random, fast: Bool = false) {
         let enemy: SKSpriteNode
         
         var enemyType = Int.random(in: 0...6)
@@ -288,28 +337,34 @@ class GameScene: SKScene {
             enemy = SKSpriteNode(imageNamed: "penguin")
             run(SKAction.playSoundFileNamed("launch.caf", waitForCompletion: false))
             enemy.name = "enemy"
+            if fast { enemy.name?.append("Fast") }
         }
         
         let randomPosition = CGPoint(x: Int.random(in: 64...1080), y: -128)
         enemy.position = randomPosition
         
-        let randomAngularVelocity = CGFloat.random(in: -3...3)
-        let randomXVelocity: Int
+        let randomAngularVelocity = CGFloat.random(in: -angularVelocity...angularVelocity)
+        var randomXVelocity: Int
         
         if randomPosition.x < 286 {
-            randomXVelocity = Int.random(in: 8...15)
+            randomXVelocity = Int.random(in: minXVelocity...maxXVelocity)
         } else if randomPosition.x < 566.5 {
-            randomXVelocity = Int.random(in: 3...5)
+            randomXVelocity = Int.random(in: minXVelocity...midMinusXVelocity)
         } else if randomPosition.x < 858 {
-            randomXVelocity = -Int.random(in: 3...5)
+            randomXVelocity = -Int.random(in: minXVelocity...midMinusXVelocity)
         } else {
-            randomXVelocity = -Int.random(in: 8...15)
+            randomXVelocity = -Int.random(in: minXVelocity...maxXVelocity)
         }
         
-        let randomYVelocity = Int.random(in: 24...32)
+        var randomYVelocity = Int.random(in: minYVelocity...maxYVelocity)
+        
+        if fast {
+            randomXVelocity += 3
+            randomYVelocity += 3
+        }
         
         enemy.physicsBody = SKPhysicsBody(circleOfRadius: 64)
-        enemy.physicsBody?.velocity = CGVector(dx: randomXVelocity * 40, dy: randomYVelocity * 40)
+        enemy.physicsBody?.velocity = CGVector(dx: randomXVelocity * velocityMultiplier, dy: randomYVelocity * velocityMultiplier)
         enemy.physicsBody?.angularVelocity = randomAngularVelocity
         enemy.physicsBody?.collisionBitMask = 0
         
@@ -433,6 +488,9 @@ class GameScene: SKScene {
             DispatchQueue.main.asyncAfter(deadline: .now() + (chainDelay / 10.0 * 2)) { [weak self] in self?.createEnemy() }
             DispatchQueue.main.asyncAfter(deadline: .now() + (chainDelay / 10.0 * 3)) { [weak self] in self?.createEnemy() }
             DispatchQueue.main.asyncAfter(deadline: .now() + (chainDelay / 10.0 * 4)) { [weak self] in self?.createEnemy() }
+            
+        case .fastMoving:
+            createEnemy(fast: true)
         }
         
         sequencePosition += 1
